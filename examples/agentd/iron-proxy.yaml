@@ -1,0 +1,56 @@
+# iron-proxy as the shared egress proxy for agentd's cloud sandboxes.
+#
+# Each sandbox reaches the proxy through HTTPS_PROXY and HTTP_PROXY set to
+# http://<session id>:<work token>@<proxy>:8080 and trusts the proxy's CA.
+# The agentd_session_swap transform is the policy gate: it authenticates
+# every tunnel, applies the session's environment networking, and swaps only
+# that session's placeholders.
+#
+# Environment:
+#   AGENTD_PLACEHOLDER_KEYS  agentd's placeholder key ring, <id>:<hex>,...
+#   AGENTD_RUNTIME_KEYS      agentd's runtime keys; the first is used
+#   AWS_REGION and the AWS default credential chain, for Secrets Manager
+
+dns:
+  enabled: false
+
+proxy:
+  http_listen: ":8081"
+  https_listen: ":8443"
+  tunnel_listen: ":8080"
+  max_request_body_bytes: 1048576
+  # Every address a sandbox has no business reaching, checked after DNS
+  # resolution: unspecified, loopback, link-local (which holds the metadata
+  # endpoints), private and shared address space.
+  upstream_deny_cidrs:
+    - "0.0.0.0/8"
+    - "127.0.0.0/8"
+    - "169.254.0.0/16"
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "100.64.0.0/10"
+    - "::/128"
+    - "::1/128"
+    - "fe80::/10"
+    - "fc00::/7"
+
+tls:
+  mode: "mitm"
+  ca_cert: "/etc/iron-proxy/ca.crt"
+  ca_key: "/etc/iron-proxy/ca.key"
+
+transforms:
+  - name: agentd_session_swap
+    config:
+      agentd_url: "https://agentd.internal"
+      store: aws_sm
+      secret_prefix: "agentd"
+      region: "us-west-2"
+      ttl: "5m"
+
+metrics:
+  listen: ":9090"
+
+log:
+  level: info
