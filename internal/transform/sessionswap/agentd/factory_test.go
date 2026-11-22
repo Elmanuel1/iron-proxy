@@ -5,6 +5,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
+
+	"github.com/ironsh/iron-proxy/internal/transform"
+	"github.com/ironsh/iron-proxy/internal/transform/sessionswap"
 )
 
 func TestBuild(t *testing.T) {
@@ -30,14 +34,31 @@ func TestBuild(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s, err := build(tc.cfg, func(k string) string { return tc.env[k] }, slog.Default())
+			opts, err := build(tc.cfg, func(k string) string { return tc.env[k] }, slog.Default())
 			if tc.err != "" {
 				require.ErrorContains(t, err, tc.err)
 				require.NotContains(t, err.Error(), keyHex)
 				return
 			}
 			require.NoError(t, err)
-			require.Equal(t, Name, s.Name())
+			require.NotNil(t, opts.Placeholders)
+			require.NotNil(t, opts.Callers)
+			require.NotNil(t, opts.Policies)
+			require.NotNil(t, opts.Values)
 		})
 	}
+}
+
+func TestRegisteredAsSessionSwapProvider(t *testing.T) {
+	factory, err := transform.Lookup(sessionswap.Name)
+	require.NoError(t, err)
+	t.Setenv(placeholderKeysEnv, "k1:"+keyHex)
+	t.Setenv(runtimeKeysEnv, "sk-ant-oat01-x")
+	var node yaml.Node
+	require.NoError(t, node.Encode(map[string]string{
+		"provider": Name, "agentd_url": "https://agentd.internal", "store": "aws_sm", "secret_prefix": "agentd",
+	}))
+	tr, err := factory(node, slog.Default())
+	require.NoError(t, err)
+	require.Equal(t, sessionswap.Name, tr.Name())
 }

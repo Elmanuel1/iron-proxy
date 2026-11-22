@@ -6,67 +6,57 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
-	"gopkg.in/yaml.v3"
-
-	"github.com/ironsh/iron-proxy/internal/transform/secrets"
 	"github.com/ironsh/iron-proxy/internal/transform/sessionswap"
 )
 
 // Store reads a credential's sealed secret, which agentd writes as JSON
 // holding the value beside its networking and injection_location. It is the
-// sessionswap.Values adapter. Each secret is read through iron-proxy's own
-// aws_sm or aws_ssm source, built the first time its name is seen, which
-// keeps the value for ttl.
+// sessionswap.Values adapter. A secret read within ttl is reused; after ttl
+// it is read again, and a failed read fails the request rather than reuse
+// the old value, so a revoked credential stops being swapped.
 type Store struct {
-	builder SourceBuilder
-	store   string
-	region  string
-	ttl     string
-	prefix  string
+	reader Reader
+	ttl    time.Duration
+	prefix string
+	now    func() time.Time
 
-	mu      sync.Mutex
-	sources map[string]secrets.Source
+	mu    sync.Mutex
+	reads map[string]read
 }
 
-type SourceBuilder interface {
-	Build(node yaml.Node) (secrets.Source, error)
+type Reader interface {
+	Read(ctx context.Context, name string) (string, error)
 }
 
-// NewStore reads secrets named `<prefix>/<workspace>/<vault>/<credential>`
-// from store, aws_sm or aws_ssm. For aws_ssm, prefix carries its leading
-// slash.
-func NewStore(builder SourceBuilder, store, region, ttl, prefix string) *Store {
-	return &Store{
-		builder: builder,
-		store:   store,
-		region:  region,
-		ttl:     ttl,
-		prefix:  prefix,
-		sources: make(map[string]secrets.Source),
+type read struct {
+	raw     string
+	expires time.Time
+}
+
+// NewStore reads secrets named `<prefix>/<workspace>/<vault>/<credential>`.
+// For Parameter Store, prefix carries its leading slash.
+func NewStore(reader Reader, ttl time.Duration, prefix string) *Store {
+	return &Store{reader: reader, ttl: ttl, prefix: prefix, now: time.Now, reads: make(map[string]read)}
+}
+
+func (s *Store) raw(ctx context.Context, name string) (string, error) {
+	s.mu.Lock()
+	hit, ok := s.reads[name]
+	s.mu.Unlock()
+	if ok && s.now().Before(hit.expires) {
+		return hit.raw, nil
 	}
-}
-
-func (s *Store) source(name string) (secrets.Source, error) {
+	raw, err := s.reader.Read(ctx, name)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if src, ok := s.sources[name]; ok {
-		return src, nil
-	}
-	key := "secret_id"
-	if s.store == "aws_ssm" {
-		key = "name"
-	}
-	var node yaml.Node
-	if err := node.Encode(map[string]string{"type": s.store, key: name, "region": s.region, "ttl": s.ttl}); err != nil {
-		return nil, fmt.Errorf("encoding source config: %w", err)
-	}
-	src, err := s.builder.Build(node)
 	if err != nil {
-		return nil, err
+		delete(s.reads, name)
+		return "", err
 	}
-	s.sources[name] = src
-	return src, nil
+	s.reads[name] = read{raw: raw, expires: s.now().Add(s.ttl)}
+	return raw, nil
 }
 
 type sealed struct {
@@ -85,11 +75,7 @@ type sealed struct {
 // Read returns the credential's value and rules. The JSON error is not
 // wrapped: it can quote the value it failed on.
 func (s *Store) Read(ctx context.Context, claim sessionswap.Claim) (sessionswap.Value, error) {
-	src, err := s.source(s.prefix + "/" + claim.Secret)
-	if err != nil {
-		return sessionswap.Value{}, err
-	}
-	raw, err := src.Get(ctx)
+	raw, err := s.raw(ctx, s.prefix+"/"+claim.Secret)
 	if err != nil {
 		return sessionswap.Value{}, err
 	}

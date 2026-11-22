@@ -2,6 +2,7 @@ package sessionswap
 
 import (
 	"context"
+	"errors"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -20,13 +21,17 @@ type metrics struct {
 
 func newMetrics() metrics {
 	m := otel.Meter(meterName)
-	// The API returns a usable no-op instrument alongside any error.
-	swaps, _ := m.Int64Counter("proxy_swaps",
+	// Each call returns a usable no-op instrument alongside any error, so an
+	// error is reported and the instrument kept.
+	swaps, swapsErr := m.Int64Counter("proxy_swaps",
 		metric.WithDescription("Placeholders replaced with a credential value."))
-	refusals, _ := m.Int64Counter("proxy_refusals",
+	refusals, refusalsErr := m.Int64Counter("proxy_refusals",
 		metric.WithDescription("Requests refused, by reason."))
-	readFailures, _ := m.Int64Counter("proxy_read_failures",
+	readFailures, readErr := m.Int64Counter("proxy_read_failures",
 		metric.WithDescription("Credential values that could not be read."))
+	if err := errors.Join(swapsErr, refusalsErr, readErr); err != nil {
+		otel.Handle(err)
+	}
 	return metrics{swaps: swaps, refusals: refusals, readFailures: readFailures}
 }
 

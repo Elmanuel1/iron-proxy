@@ -4,40 +4,29 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 
-	"github.com/ironsh/iron-proxy/internal/transform/secrets"
 	"github.com/ironsh/iron-proxy/internal/transform/sessionswap"
 )
 
-type fakeSource struct {
-	value string
-	err   error
+type fakeReader struct {
+	values map[string]string
+	err    error
+	names  []string
 }
 
-func (f *fakeSource) Name() string { return "fake" }
-
-func (f *fakeSource) Get(context.Context) (string, error) { return f.value, f.err }
-
-type fakeBuilder struct {
-	sources map[string]*fakeSource
-	configs []map[string]string
-}
-
-func (f *fakeBuilder) Build(node yaml.Node) (secrets.Source, error) {
-	var cfg map[string]string
-	if err := node.Decode(&cfg); err != nil {
-		return nil, err
+func (f *fakeReader) Read(_ context.Context, name string) (string, error) {
+	f.names = append(f.names, name)
+	if f.err != nil {
+		return "", f.err
 	}
-	f.configs = append(f.configs, cfg)
-	name := cfg["secret_id"] + cfg["name"]
-	src, ok := f.sources[name]
+	v, ok := f.values[name]
 	if !ok {
-		return nil, errors.New("no such source")
+		return "", errors.New("not found")
 	}
-	return src, nil
+	return v, nil
 }
 
 var claim = sessionswap.Claim{Session: "sesn_1", Credential: "cred_1", Secret: "wrkspc_1/vlt_1/cred_1"}
@@ -81,9 +70,9 @@ func TestStoreRead(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			b := &fakeBuilder{sources: map[string]*fakeSource{name: {value: tc.sealed}}}
-			got, err := NewStore(b, "aws_sm", "us-west-2", "5m", "agentd").Read(context.Background(), claim)
-			require.Equal(t, []map[string]string{{"type": "aws_sm", "secret_id": name, "region": "us-west-2", "ttl": "5m"}}, b.configs)
+			r := &fakeReader{values: map[string]string{name: tc.sealed}}
+			got, err := NewStore(r, 5*time.Minute, "agentd").Read(context.Background(), claim)
+			require.Equal(t, []string{name}, r.names)
 			if tc.err != "" {
 				require.ErrorContains(t, err, tc.err)
 				require.NotContains(t, err.Error(), "secret-value-in-the-clear")
@@ -95,23 +84,42 @@ func TestStoreRead(t *testing.T) {
 	}
 }
 
-func TestStoreBuildsOneSourcePerSecret(t *testing.T) {
+func TestStoreTTL(t *testing.T) {
 	const name = "/agentd/wrkspc_1/vlt_1/cred_1"
-	src := &fakeSource{value: `{"type":"environment_variable","secret_value":"v"}`}
-	b := &fakeBuilder{sources: map[string]*fakeSource{name: src}}
-	s := NewStore(b, "aws_ssm", "", "1m", "/agentd")
-	for range 2 {
-		_, err := s.Read(context.Background(), claim)
-		require.NoError(t, err)
+	sealed := func(v string) string { return `{"type":"environment_variable","secret_value":"` + v + `"}` }
+	r := &fakeReader{values: map[string]string{name: sealed("first")}}
+	now := time.Unix(1000, 0)
+	s := NewStore(r, time.Minute, "/agentd")
+	s.now = func() time.Time { return now }
+	value := func() (string, error) {
+		v, err := s.Read(context.Background(), claim)
+		return v.Secret, err
 	}
-	require.Equal(t, []map[string]string{{"type": "aws_ssm", "name": name, "region": "", "ttl": "1m"}}, b.configs)
 
-	src.err = errors.New("throttled")
-	_, err := s.Read(context.Background(), claim)
-	require.ErrorContains(t, err, "throttled")
-}
+	got, err := value()
+	require.NoError(t, err)
+	require.Equal(t, "first", got)
 
-func TestStoreUnknownSecret(t *testing.T) {
-	_, err := NewStore(&fakeBuilder{}, "aws_sm", "", "5m", "agentd").Read(context.Background(), claim)
-	require.ErrorContains(t, err, "no such source")
+	r.values[name] = sealed("rotated")
+	now = now.Add(time.Minute - time.Second)
+	got, err = value()
+	require.NoError(t, err)
+	require.Equal(t, "first", got, "kept within the ttl")
+	require.Len(t, r.names, 1)
+
+	now = now.Add(time.Second)
+	got, err = value()
+	require.NoError(t, err)
+	require.Equal(t, "rotated", got, "read again once the ttl passes")
+
+	r.err = errors.New("throttled")
+	now = now.Add(time.Minute)
+	_, err = value()
+	require.ErrorContains(t, err, "throttled", "an expired value is never reused when its read fails")
+
+	r.err = nil
+	got, err = value()
+	require.NoError(t, err)
+	require.Equal(t, "rotated", got)
+	require.Len(t, r.names, 4)
 }

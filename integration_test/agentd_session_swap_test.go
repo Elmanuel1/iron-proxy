@@ -80,7 +80,7 @@ func TestAgentdSessionSwap(t *testing.T) {
 
 	own := swapPlaceholder(t, "sesn_a", "cred_1")
 	t.Run("own placeholder is swapped and Proxy-Authorization stripped", func(t *testing.T) {
-		got := sendThrough(t, tunnel, "sesn_a:tok_a", target, own)
+		got := sendThrough(t, ctx, tunnel, "sesn_a:tok_a", target, own)
 		require.Equal(t, http.StatusOK, got.status)
 		require.Equal(t, "first-value", got.key)
 		require.Empty(t, got.proxyAuth)
@@ -93,7 +93,7 @@ func TestAgentdSessionSwap(t *testing.T) {
 		})
 		require.NoError(t, err)
 		time.Sleep(1100 * time.Millisecond)
-		require.Equal(t, "rotated-value", sendThrough(t, tunnel, "sesn_a:tok_a", target, own).key)
+		require.Equal(t, "rotated-value", sendThrough(t, ctx, tunnel, "sesn_a:tok_a", target, own).key)
 	})
 
 	unchanged := []struct{ name, placeholder string }{
@@ -103,14 +103,14 @@ func TestAgentdSessionSwap(t *testing.T) {
 	}
 	for _, tc := range unchanged {
 		t.Run(tc.name+" is sent unchanged", func(t *testing.T) {
-			got := sendThrough(t, tunnel, "sesn_a:tok_a", target, tc.placeholder)
+			got := sendThrough(t, ctx, tunnel, "sesn_a:tok_a", target, tc.placeholder)
 			require.Equal(t, http.StatusOK, got.status)
 			require.Equal(t, tc.placeholder, got.key)
 		})
 	}
 
 	t.Run("an unreadable value is 502", func(t *testing.T) {
-		got := sendThrough(t, tunnel, "sesn_a:tok_a", target, swapPlaceholder(t, "sesn_a", "cred_missing"))
+		got := sendThrough(t, ctx, tunnel, "sesn_a:tok_a", target, swapPlaceholder(t, "sesn_a", "cred_missing"))
 		require.Equal(t, http.StatusBadGateway, got.status)
 	})
 
@@ -127,14 +127,14 @@ func TestAgentdSessionSwap(t *testing.T) {
 	}
 	for _, tc := range refused {
 		t.Run(tc.name+" is refused", func(t *testing.T) {
-			got := sendThrough(t, tunnel, tc.auth, tc.url, own)
+			got := sendThrough(t, ctx, tunnel, tc.auth, tc.url, own)
 			require.Equal(t, tc.status, got.status)
 			require.Empty(t, got.key, "the request never reached an upstream")
 		})
 	}
 
 	t.Run("an unrestricted environment reaches a host outside any list", func(t *testing.T) {
-		got := sendThrough(t, tunnel, "sesn_open:tok_open", plain.URL+"/echo", own)
+		got := sendThrough(t, ctx, tunnel, "sesn_open:tok_open", plain.URL+"/echo", own)
 		require.Equal(t, http.StatusOK, got.status)
 		require.Equal(t, own, got.key, "plain HTTP is never swapped")
 	})
@@ -287,7 +287,7 @@ type echoed struct {
 
 // sendThrough sends one GET to target through the tunnel listener with auth
 // (`session:token`, or empty) in the proxy URL, as HTTPS_PROXY carries it.
-func sendThrough(t *testing.T, tunnel, auth, target, apiKey string) echoed {
+func sendThrough(t *testing.T, ctx context.Context, tunnel, auth, target, apiKey string) echoed {
 	t.Helper()
 	proxyURL := &url.URL{Scheme: "http", Host: tunnel}
 	if auth != "" {
@@ -310,9 +310,15 @@ func sendThrough(t *testing.T, tunnel, auth, target, apiKey string) echoed {
 			},
 		},
 	}
-	req, err := http.NewRequest(http.MethodGet, target, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	require.NoError(t, err)
 	req.Header.Set("X-Api-Key", apiKey)
+	// An https request travels inside the tunnel, where this is ignored and
+	// removed: the CONNECT's credentials decide the session. A plain-HTTP
+	// request would send it in place of the proxy URL's credentials.
+	if strings.HasPrefix(target, "https://") {
+		req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("sesn_open:tok_open")))
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		require.NotZero(t, connectStatus, "only a refused CONNECT may fail the request: %v", err)

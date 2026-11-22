@@ -11,6 +11,7 @@ import (
 
 	proxyconfig "github.com/ironsh/iron-proxy/internal/config"
 	"github.com/ironsh/iron-proxy/internal/dnsguard"
+	"github.com/ironsh/iron-proxy/internal/transform/sessionswap"
 )
 
 func loadExample(t *testing.T) *proxyconfig.Config {
@@ -56,7 +57,7 @@ func TestExampleDeniesInternalAddresses(t *testing.T) {
 func TestExampleTransformBuilds(t *testing.T) {
 	cfg := loadExample(t)
 	require.Len(t, cfg.Transforms, 1)
-	require.Equal(t, Name, cfg.Transforms[0].Name)
+	require.Equal(t, sessionswap.Name, cfg.Transforms[0].Name)
 	var c config
 	require.NoError(t, cfg.Transforms[0].Config.Decode(&c))
 	env := map[string]string{placeholderKeysEnv: "k1:" + keyHex, runtimeKeysEnv: "sk-ant-oat01-x"}

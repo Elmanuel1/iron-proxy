@@ -18,7 +18,7 @@ const (
 
 // caller returns the request's session. Inside a tunnel it is the identity
 // this transform annotated on the tunnel's CONNECT, and any
-// Proxy-Authorization on the inner request is ignored. The tunnel's traces
+// Proxy-Authorization on the inner request is removed. The tunnel's traces
 // come from the proxy's own CONNECT pipeline run, never from the client.
 // Elsewhere (CONNECT itself, absolute-form HTTP) the request's own header is
 // checked. A refusal comes back as a 407 response; an error means the
@@ -36,6 +36,8 @@ func (s *Swap) caller(ctx context.Context, tctx *transform.TransformContext, req
 		return Caller{}, proxyAuthRequired(), nil
 	}
 	if inTunnel {
+		// Ignored, so never searched for placeholders either.
+		req.Header.Del("Proxy-Authorization")
 		annotations := tctx.Tunnel.RequestTransforms[bound].Annotations
 		session, _ := annotations[annotationSession].(string)
 		environment, _ := annotations[annotationEnvironment].(string)

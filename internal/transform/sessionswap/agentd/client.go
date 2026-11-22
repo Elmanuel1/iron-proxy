@@ -66,10 +66,14 @@ func NewClient(base, runtimeKey string, logger *slog.Logger, hc *http.Client) (*
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return nil, fmt.Errorf("agentd url %q must be an https URL", base)
 	}
+	noRedirects := *hc
+	// A redirect could carry the bearer to plain HTTP on the same host, and
+	// agentd's API answers without one.
+	noRedirects.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &Client{
 		base:       u,
 		runtimeKey: runtimeKey,
-		http:       hc,
+		http:       &noRedirects,
 		logger:     logger,
 		now:        time.Now,
 		callers:    make(map[[32]byte]cached[sessionswap.Caller]),

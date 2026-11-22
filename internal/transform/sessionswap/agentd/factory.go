@@ -1,6 +1,7 @@
-// Package agentd adapts sessionswap to agentd: its signed placeholders, its
-// Managed Agents API for sessions and environments, and its sealed
-// credential secrets in Secrets Manager or Parameter Store.
+// Package agentd is the session_swap provider for agentd (`provider:
+// agentd`): its signed placeholders, its Managed Agents API for sessions and
+// environments, and its sealed credential secrets in Secrets Manager or
+// Parameter Store.
 package agentd
 
 import (
@@ -15,13 +16,12 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/ironsh/iron-proxy/internal/transform"
 	"github.com/ironsh/iron-proxy/internal/transform/secrets"
 	"github.com/ironsh/iron-proxy/internal/transform/sessionswap"
 )
 
-// Name is the transform's name in the config.
-const Name = "agentd_session_swap"
+// Name is the provider's name in the config.
+const Name = "agentd"
 
 const (
 	placeholderKeysEnv = "AGENTD_PLACEHOLDER_KEYS"
@@ -30,7 +30,7 @@ const (
 )
 
 func init() {
-	transform.Register(Name, factory)
+	sessionswap.RegisterProvider(Name, provider)
 }
 
 type config struct {
@@ -45,26 +45,26 @@ type config struct {
 // lifetime agentd's design gives a copy of a credential's sealed secret.
 const defaultTTL = "5m"
 
-func factory(node yaml.Node, logger *slog.Logger) (transform.Transformer, error) {
+func provider(node yaml.Node, logger *slog.Logger) (sessionswap.Options, error) {
 	var cfg config
 	if err := node.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("parsing %s config: %w", Name, err)
+		return sessionswap.Options{}, fmt.Errorf("parsing config: %w", err)
 	}
 	return build(cfg, os.Getenv, logger)
 }
 
-func build(cfg config, getenv func(string) string, logger *slog.Logger) (*sessionswap.Swap, error) {
+func build(cfg config, getenv func(string) string, logger *slog.Logger) (sessionswap.Options, error) {
 	if cfg.SecretPrefix == "" {
-		return nil, fmt.Errorf("%s requires \"secret_prefix\"", Name)
+		return sessionswap.Options{}, errors.New("requires \"secret_prefix\"")
 	}
 	ring, err := ParseRing(getenv(placeholderKeysEnv))
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", placeholderKeysEnv, err)
+		return sessionswap.Options{}, fmt.Errorf("%s: %w", placeholderKeysEnv, err)
 	}
 	runtimeKey, _, _ := strings.Cut(getenv(runtimeKeysEnv), ",")
 	runtimeKey = strings.TrimSpace(runtimeKey)
 	if runtimeKey == "" {
-		return nil, fmt.Errorf("%s: %w", runtimeKeysEnv, errors.New("no key"))
+		return sessionswap.Options{}, fmt.Errorf("%s: %w", runtimeKeysEnv, errors.New("no key"))
 	}
 	client, err := NewClient(cfg.AgentdURL, runtimeKey, logger, &http.Client{
 		Timeout: apiTimeout,
@@ -77,30 +77,27 @@ func build(cfg config, getenv func(string) string, logger *slog.Logger) (*sessio
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", Name, err)
+		return sessionswap.Options{}, err
 	}
-	if cfg.Store != "aws_sm" && cfg.Store != "aws_ssm" {
-		return nil, fmt.Errorf("%s: store %q is not aws_sm or aws_ssm", Name, cfg.Store)
+	reader, err := secrets.NewReader(cfg.Store, cfg.Region, logger)
+	if err != nil {
+		return sessionswap.Options{}, err
 	}
 	if cfg.TTL == "" {
 		cfg.TTL = defaultTTL
 	}
-	if _, err := time.ParseDuration(cfg.TTL); err != nil {
-		return nil, fmt.Errorf("%s: ttl: %w", Name, err)
+	ttl, err := time.ParseDuration(cfg.TTL)
+	if err != nil {
+		return sessionswap.Options{}, fmt.Errorf("ttl: %w", err)
 	}
 	prefix := cfg.SecretPrefix
 	if cfg.Store == "aws_ssm" && !strings.HasPrefix(prefix, "/") {
 		prefix = "/" + prefix
 	}
-	if err := startMetrics(); err != nil {
-		return nil, fmt.Errorf("%s: %w", Name, err)
-	}
-	return sessionswap.New(sessionswap.Options{
-		Name:         Name,
+	return sessionswap.Options{
 		Placeholders: ring,
 		Callers:      client,
 		Policies:     client,
-		Values:       NewStore(secrets.NewSourceBuilder(logger), cfg.Store, cfg.Region, cfg.TTL, prefix),
-		Logger:       logger,
-	}), nil
+		Values:       NewStore(reader, ttl, prefix),
+	}, nil
 }

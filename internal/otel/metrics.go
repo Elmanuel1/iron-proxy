@@ -31,20 +31,6 @@ func NewMeterProvider(ctx context.Context) (*sdkmetric.MeterProvider, error) {
 		protocol = "http/protobuf"
 	}
 
-	var exporter sdkmetric.Exporter
-	var err error
-	switch protocol {
-	case "http/protobuf":
-		exporter, err = otlpmetrichttp.New(ctx)
-	case "grpc":
-		exporter, err = otlpmetricgrpc.New(ctx)
-	default:
-		return nil, fmt.Errorf("unsupported OTLP metrics protocol: %q (expected \"http/protobuf\" or \"grpc\")", protocol)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("creating OTLP metric exporter: %w", err)
-	}
-
 	serviceName := os.Getenv("OTEL_SERVICE_NAME")
 	if serviceName == "" {
 		serviceName = "iron-proxy"
@@ -56,6 +42,21 @@ func NewMeterProvider(ctx context.Context) (*sdkmetric.MeterProvider, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating OTEL resource: %w", err)
+	}
+
+	// The resource is built first: an exporter made before a failing step
+	// would hold its connection with nothing to shut it down.
+	var exporter sdkmetric.Exporter
+	switch protocol {
+	case "http/protobuf":
+		exporter, err = otlpmetrichttp.New(ctx)
+	case "grpc":
+		exporter, err = otlpmetricgrpc.New(ctx)
+	default:
+		return nil, fmt.Errorf("unsupported OTLP metrics protocol: %q (expected \"http/protobuf\" or \"grpc\")", protocol)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("creating OTLP metric exporter: %w", err)
 	}
 
 	return sdkmetric.NewMeterProvider(

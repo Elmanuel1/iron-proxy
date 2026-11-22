@@ -213,3 +213,19 @@ func TestNewClientURL(t *testing.T) {
 		})
 	}
 }
+
+func TestRedirectsAreNotFollowed(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.Redirect(w, r, "http://"+r.Host+r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	now := time.Unix(1000, 0)
+	c := newTestClient(t, srv, &now)
+	_, err := c.Check(context.Background(), "sesn_1", "tok")
+	require.ErrorContains(t, err, "status 302")
+	_, err = c.Egress(context.Background(), "env_1")
+	require.ErrorContains(t, err, "status 302")
+	require.EqualValues(t, 2, hits.Load(), "no redirect is followed")
+}

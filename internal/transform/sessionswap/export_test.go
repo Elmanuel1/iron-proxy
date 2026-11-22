@@ -1,4 +1,4 @@
-package agentd
+package sessionswap
 
 import (
 	"context"
@@ -8,10 +8,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
 func TestExportMetrics(t *testing.T) {
+	otel.SetMeterProvider(noop.NewMeterProvider())
+	t.Cleanup(func() { otel.SetMeterProvider(noop.NewMeterProvider()) })
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "")
 	require.NoError(t, exportMetrics())

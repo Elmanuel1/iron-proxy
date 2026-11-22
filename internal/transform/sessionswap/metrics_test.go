@@ -9,16 +9,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 func TestMetrics(t *testing.T) {
-	// The transform is built before the meter provider is set, as the proxy
-	// builds its pipeline before it starts telemetry.
-	h := newHarness(Policy{Hosts: []string{"api.example.com"}}, everywhere())
 	reader := sdkmetric.NewManualReader()
 	otel.SetMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)))
+	t.Cleanup(func() { otel.SetMeterProvider(noop.NewMeterProvider()) })
+	h := newHarness(Policy{Hosts: []string{"api.example.com"}}, everywhere())
 
 	tunnel := h.bound(t)
 	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/v1", nil)

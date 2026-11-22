@@ -91,7 +91,7 @@ func newHarness(policy Policy, value Value) *harness {
 		logs:    logs,
 	}
 	h.swap = New(Options{
-		Name: "agentd_session_swap",
+		Name: Name,
 		Placeholders: fakePlaceholders{claims: map[string]Claim{
 			ownPlaceholder:   {Session: "sesn_a", Credential: "cred_own", Secret: "ws/vlt/cred_own"},
 			otherPlaceholder: {Session: "sesn_b", Credential: "cred_other", Secret: "ws/vlt/cred_other"},

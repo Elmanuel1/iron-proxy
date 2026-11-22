@@ -23,8 +23,9 @@ tls:
   ca_key: tmp/ca.key
 
 transforms:
-  - name: agentd_session_swap
+  - name: session_swap
     config:
+      provider: agentd
       agentd_url: "{{.AgentdURL}}"
       store: aws_sm
       secret_prefix: "agentd"

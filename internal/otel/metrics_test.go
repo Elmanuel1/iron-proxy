@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -40,6 +41,7 @@ func TestNewMeterProviderProtocol(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:1")
+			t.Setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "")
 			t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", tc.protocol)
 			t.Setenv("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", tc.metricsProtocol)
 			mp, err := NewMeterProvider(context.Background())
@@ -48,7 +50,13 @@ func TestNewMeterProviderProtocol(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			require.NotNil(t, mp)
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if err := mp.Shutdown(ctx); err != nil {
+					t.Logf("final export to the closed test endpoint failed, as expected: %v", err)
+				}
+			})
 		})
 	}
 }
@@ -63,6 +71,7 @@ func TestNewMeterProviderExportsOverOTLP(t *testing.T) {
 	}))
 	defer collector.Close()
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.URL)
+	t.Setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", "")
 

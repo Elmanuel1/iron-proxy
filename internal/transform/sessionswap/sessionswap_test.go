@@ -63,6 +63,7 @@ func TestInnerRequestUsesTunnelIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, transform.ActionContinue, res.Action)
 	require.Equal(t, "Bearer "+realValue, req.Header.Get("Authorization"))
+	require.Empty(t, req.Header.Values("Proxy-Authorization"), "the ignored inner header is removed")
 	require.Equal(t, 1, h.callers.calls, "the tunnel is checked once, at CONNECT")
 
 	unbound := &transform.TunnelInfo{Target: "api.example.com:443"}
