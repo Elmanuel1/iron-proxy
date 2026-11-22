@@ -29,7 +29,6 @@ type Store struct {
 	sources map[string]secrets.Source
 }
 
-// SourceBuilder builds a secret source from its config.
 type SourceBuilder interface {
 	Build(node yaml.Node) (secrets.Source, error)
 }

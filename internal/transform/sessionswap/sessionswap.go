@@ -22,7 +22,6 @@ import (
 // pair, as opposed to failing to answer.
 var ErrRefused = errors.New("caller refused")
 
-// Caller is an authenticated session and the environment it runs in.
 type Caller struct {
 	Session     string
 	Environment string
@@ -52,7 +51,6 @@ type Value struct {
 	Body   bool
 }
 
-// Placeholders finds and verifies placeholders.
 type Placeholders interface {
 	Find(text string) []string
 	// Verify reports false for a placeholder that does not verify.
@@ -61,22 +59,18 @@ type Placeholders interface {
 	Fingerprint(value string) string
 }
 
-// Callers checks a session and its token against the session store.
 type Callers interface {
 	Check(ctx context.Context, session, token string) (Caller, error)
 }
 
-// Policies reads an environment's egress policy.
 type Policies interface {
 	Egress(ctx context.Context, environment string) (Policy, error)
 }
 
-// Values reads a credential's sealed secret from its store, with no cache.
 type Values interface {
 	Read(ctx context.Context, claim Claim) (Value, error)
 }
 
-// Options are the ports a Swap uses.
 type Options struct {
 	Name         string
 	Placeholders Placeholders

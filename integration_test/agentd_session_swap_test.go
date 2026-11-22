@@ -89,7 +89,7 @@ func TestAgentdSessionSwap(t *testing.T) {
 	t.Run("a rotated value is used once the ttl passes", func(t *testing.T) {
 		_, err := sm.PutSecretValue(ctx, &secretsmanager.PutSecretValueInput{
 			SecretId:     aws.String("agentd/wrkspc_1/vlt_1/cred_1"),
-			SecretString: aws.String(sealedCredential("rotated-value", []string{"localhost"})),
+			SecretString: aws.String(sealedCredential(t, "rotated-value", []string{"localhost"})),
 		})
 		require.NoError(t, err)
 		time.Sleep(1100 * time.Millisecond)
@@ -162,14 +162,16 @@ func startLocalStack(t *testing.T, ctx context.Context) string {
 	return "http://" + net.JoinHostPort(host, port.Port())
 }
 
-func sealedCredential(value string, hosts []string) string {
-	b, _ := json.Marshal(map[string]any{
+func sealedCredential(t *testing.T, value string, hosts []string) string {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{
 		"type":               "environment_variable",
 		"secret_name":        "API_KEY",
 		"secret_value":       value,
 		"networking":         map[string]any{"type": "limited", "allowed_hosts": hosts},
 		"injection_location": map[string]bool{"header": true, "body": true},
 	})
+	require.NoError(t, err)
 	return string(b)
 }
 
@@ -177,7 +179,7 @@ func putCredential(t *testing.T, ctx context.Context, sm *secretsmanager.Client,
 	t.Helper()
 	_, err := sm.CreateSecret(ctx, &secretsmanager.CreateSecretInput{
 		Name:         aws.String("agentd/wrkspc_1/vlt_1/" + credential),
-		SecretString: aws.String(sealedCredential(value, hosts)),
+		SecretString: aws.String(sealedCredential(t, value, hosts)),
 	})
 	require.NoError(t, err)
 }

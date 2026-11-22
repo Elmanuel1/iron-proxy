@@ -12,7 +12,6 @@ type SourceBuilder struct {
 	registry sourceBuilderRegistry
 }
 
-// NewSourceBuilder returns a SourceBuilder.
 func NewSourceBuilder(logger *slog.Logger) *SourceBuilder {
 	return &SourceBuilder{registry: defaultRegistry(logger)}
 }

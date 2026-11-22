@@ -63,7 +63,9 @@ endpoints), private (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
 
 With `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`)
 set, the transform exports three counters over OTLP every 60 s, by the
-standard `OTEL_*` variables:
+standard `OTEL_*` variables. Export starts with the transform, so a proxy
+without it exports no metrics, and a stop drops what was counted since the
+last send:
 
 | Metric | Meaning | Alert when |
 |---|---|---|

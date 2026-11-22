@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sync"
@@ -44,6 +45,7 @@ type Client struct {
 	base       *url.URL
 	runtimeKey string
 	http       *http.Client
+	logger     *slog.Logger
 	now        func() time.Time
 
 	mu       sync.Mutex
@@ -59,7 +61,7 @@ type cached[T any] struct {
 
 // NewClient reads environments with runtimeKey. base must be https: both
 // the work token and the runtime key travel on it.
-func NewClient(base, runtimeKey string, hc *http.Client) (*Client, error) {
+func NewClient(base, runtimeKey string, logger *slog.Logger, hc *http.Client) (*Client, error) {
 	u, err := url.Parse(base)
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return nil, fmt.Errorf("agentd url %q must be an https URL", base)
@@ -68,6 +70,7 @@ func NewClient(base, runtimeKey string, hc *http.Client) (*Client, error) {
 		base:       u,
 		runtimeKey: runtimeKey,
 		http:       hc,
+		logger:     logger,
 		now:        time.Now,
 		callers:    make(map[[32]byte]cached[sessionswap.Caller]),
 		policies:   make(map[string]cached[sessionswap.Policy]),
@@ -108,7 +111,7 @@ func (c *Client) Check(ctx context.Context, session, token string) (sessionswap.
 
 // Egress reads the environment's networking with the runtime key. An
 // environment with no networking is unrestricted, as agentd defaults it; one
-// whose networking does not parse allows no host.
+// whose networking does not parse allows no host, as agentd reads it.
 func (c *Client) Egress(ctx context.Context, environment string) (sessionswap.Policy, error) {
 	if hit, ok := lookup(c, c.policies, environment); ok {
 		return hit.value, nil
@@ -121,35 +124,33 @@ func (c *Client) Egress(ctx context.Context, environment string) (sessionswap.Po
 	if err := c.get(ctx, "/v1/environments/"+url.PathEscape(environment), c.runtimeKey, &body); err != nil {
 		return sessionswap.Policy{}, err
 	}
-	policy := parseNetworking(body.Config.Networking)
-	store(c, c.policies, environment, cached[sessionswap.Policy]{value: policy})
-	return policy, nil
-}
-
-func parseNetworking(raw json.RawMessage) sessionswap.Policy {
-	if len(raw) == 0 || string(raw) == "null" {
-		return sessionswap.Policy{Unrestricted: true}
-	}
 	var n struct {
 		Type                 string   `json:"type"`
 		AllowedHosts         []string `json:"allowed_hosts"`
 		AllowPackageManagers bool     `json:"allow_package_managers"`
 	}
-	if err := json.Unmarshal(raw, &n); err != nil {
-		return sessionswap.Policy{}
+	raw := body.Config.Networking
+	if len(raw) == 0 || string(raw) == "null" {
+		n.Type = "unrestricted"
 	}
+	if n.Type == "" && json.Unmarshal(raw, &n) != nil {
+		n.Type = "unreadable"
+	}
+	var policy sessionswap.Policy
 	switch n.Type {
 	case "unrestricted":
-		return sessionswap.Policy{Unrestricted: true}
+		policy.Unrestricted = true
 	case "limited":
-		hosts := append([]string(nil), n.AllowedHosts...)
-		if n.AllowPackageManagers {
-			hosts = append(hosts, packageHosts...)
-		}
-		return sessionswap.Policy{Hosts: hosts}
+		policy.Hosts = append([]string(nil), n.AllowedHosts...)
 	default:
-		return sessionswap.Policy{}
+		c.logger.Warn("environment networking unreadable, allowing no host",
+			slog.String("environment", environment), slog.String("type", n.Type))
 	}
+	if n.Type == "limited" && n.AllowPackageManagers {
+		policy.Hosts = append(policy.Hosts, packageHosts...)
+	}
+	store(c, c.policies, environment, cached[sessionswap.Policy]{value: policy})
+	return policy, nil
 }
 
 // get decodes a 200 answer into out. A 401, 403 or 404 is ErrRefused; any

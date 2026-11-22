@@ -2,6 +2,8 @@ package agentd
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -39,7 +41,7 @@ func (f *fakeAgentd) serve(t *testing.T, wantPath, wantBearer string) *httptest.
 
 func newTestClient(t *testing.T, srv *httptest.Server, now *time.Time) *Client {
 	t.Helper()
-	c, err := NewClient(srv.URL, "sk-ant-oat01-runtime", srv.Client())
+	c, err := NewClient(srv.URL, "sk-ant-oat01-runtime", slog.New(slog.NewTextHandler(io.Discard, nil)), srv.Client())
 	require.NoError(t, err)
 	c.now = func() time.Time { return *now }
 	return c
@@ -98,7 +100,8 @@ func TestCheckFailures(t *testing.T) {
 			require.Error(t, err)
 			require.Equal(t, tc.refused, err == sessionswap.ErrRefused)
 			if !tc.refused {
-				_, _ = c.Check(context.Background(), "sesn_1", "tok")
+				_, err = c.Check(context.Background(), "sesn_1", "tok")
+				require.Error(t, err)
 				require.EqualValues(t, 2, f.hits.Load(), "a failure to answer is not kept")
 			}
 		})
@@ -186,7 +189,7 @@ func TestNewClientURL(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.url, func(t *testing.T) {
-			_, err := NewClient(tc.url, "k", http.DefaultClient)
+			_, err := NewClient(tc.url, "k", slog.Default(), http.DefaultClient)
 			if tc.ok {
 				require.NoError(t, err)
 				return

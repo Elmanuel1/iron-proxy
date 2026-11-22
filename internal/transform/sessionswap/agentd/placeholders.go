@@ -21,6 +21,7 @@ const placeholderPrefix = "agentd-ph-"
 var (
 	placeholderPattern = regexp.MustCompile(`agentd-ph-[A-Za-z0-9]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}`)
 	idPattern          = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	keyIDPattern       = regexp.MustCompile(`^[A-Za-z0-9]+$`)
 )
 
 // Ring verifies agentd's placeholders under the key ring agentd signs them
@@ -42,7 +43,7 @@ func ParseRing(raw string) (*Ring, error) {
 		}
 		id, hexKey, ok := strings.Cut(entry, ":")
 		key, err := hex.DecodeString(hexKey)
-		if !ok || err != nil || len(key) < 16 || !isAlnum(id) {
+		if !ok || err != nil || len(key) < 16 || !keyIDPattern.MatchString(id) {
 			return nil, fmt.Errorf("entry %d is not `<id>:<hex of at least 16 bytes>`", i+1)
 		}
 		if _, seen := r.keys[id]; seen {
@@ -125,16 +126,4 @@ func mac(key []byte, message string) []byte {
 	h := hmac.New(sha256.New, key)
 	h.Write([]byte(message))
 	return h.Sum(nil)
-}
-
-func isAlnum(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, c := range s {
-		if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9') {
-			return false
-		}
-	}
-	return true
 }
