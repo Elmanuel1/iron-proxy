@@ -54,9 +54,6 @@ func factory(node yaml.Node, logger *slog.Logger) (transform.Transformer, error)
 }
 
 func build(cfg config, getenv func(string) string, logger *slog.Logger) (*sessionswap.Swap, error) {
-	if err := startMetrics(); err != nil {
-		return nil, fmt.Errorf("%s: %w", Name, err)
-	}
 	if cfg.SecretPrefix == "" {
 		return nil, fmt.Errorf("%s requires \"secret_prefix\"", Name)
 	}
@@ -94,6 +91,9 @@ func build(cfg config, getenv func(string) string, logger *slog.Logger) (*sessio
 	prefix := cfg.SecretPrefix
 	if cfg.Store == "aws_ssm" && !strings.HasPrefix(prefix, "/") {
 		prefix = "/" + prefix
+	}
+	if err := startMetrics(); err != nil {
+		return nil, fmt.Errorf("%s: %w", Name, err)
 	}
 	return sessionswap.New(sessionswap.Options{
 		Name:         Name,

@@ -1,6 +1,7 @@
 package agentd
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -41,7 +42,12 @@ func (f *fakeAgentd) serve(t *testing.T, wantPath, wantBearer string) *httptest.
 
 func newTestClient(t *testing.T, srv *httptest.Server, now *time.Time) *Client {
 	t.Helper()
-	c, err := NewClient(srv.URL, "sk-ant-oat01-runtime", slog.New(slog.NewTextHandler(io.Discard, nil)), srv.Client())
+	return newLoggingClient(t, srv, now, io.Discard)
+}
+
+func newLoggingClient(t *testing.T, srv *httptest.Server, now *time.Time, logs io.Writer) *Client {
+	t.Helper()
+	c, err := NewClient(srv.URL, "sk-ant-oat01-runtime", slog.New(slog.NewJSONHandler(logs, nil)), srv.Client())
 	require.NoError(t, err)
 	c.now = func() time.Time { return *now }
 	return c
@@ -125,25 +131,34 @@ func TestEgress(t *testing.T) {
 		name string
 		body string
 		want sessionswap.Policy
+		warn string
 	}{
-		{"unrestricted", `{"config":{"type":"cloud","networking":{"type":"unrestricted"}}}`, sessionswap.Policy{Unrestricted: true}},
-		{"no networking", `{"config":{"type":"self_hosted"}}`, sessionswap.Policy{Unrestricted: true}},
+		{"unrestricted", `{"config":{"type":"cloud","networking":{"type":"unrestricted"}}}`, sessionswap.Policy{Unrestricted: true}, ""},
+		{"no networking", `{"config":{"type":"self_hosted"}}`, sessionswap.Policy{Unrestricted: true}, ""},
 		{"limited", `{"config":{"networking":{"type":"limited","allowed_hosts":["api.example.com"]}}}`,
-			sessionswap.Policy{Hosts: []string{"api.example.com"}}},
+			sessionswap.Policy{Hosts: []string{"api.example.com"}}, ""},
 		{"limited with registries", `{"config":{"networking":{"type":"limited","allowed_hosts":["a.com"],"allow_package_managers":true}}}`,
-			sessionswap.Policy{Hosts: append([]string{"a.com"}, packageHosts...)}},
-		{"unknown type", `{"config":{"networking":{"type":"open"}}}`, sessionswap.Policy{}},
-		{"unreadable", `{"config":{"networking":{"type":"limited","allowed_hosts":"all"}}}`, sessionswap.Policy{}},
+			sessionswap.Policy{Hosts: append([]string{"a.com"}, packageHosts...)}, ""},
+		{"unknown type", `{"config":{"networking":{"type":"open"}}}`, sessionswap.Policy{}, "open"},
+		{"unreadable", `{"config":{"networking":{"type":"limited","allowed_hosts":"all"}}}`, sessionswap.Policy{}, "unreadable"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeAgentd{body: tc.body}
 			srv := f.serve(t, "/v1/environments/env_1", "sk-ant-oat01-runtime")
 			now := time.Unix(1000, 0)
-			c := newTestClient(t, srv, &now)
+			logs := &bytes.Buffer{}
+			c := newLoggingClient(t, srv, &now, logs)
 			got, err := c.Egress(context.Background(), "env_1")
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got)
+			if tc.warn == "" {
+				require.Empty(t, logs.String())
+				return
+			}
+			require.Contains(t, logs.String(), `"level":"WARN"`)
+			require.Contains(t, logs.String(), `"environment":"env_1"`)
+			require.Contains(t, logs.String(), `"type":"`+tc.warn+`"`)
 		})
 	}
 }
