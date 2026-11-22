@@ -16,28 +16,43 @@ import (
 func TestReaderReadsEveryCall(t *testing.T) {
 	var calls int
 	var fail bool
-	sm := &mockSMClient{fn: func(_ context.Context, in *secretsmanager.GetSecretValueInput) (*secretsmanager.GetSecretValueOutput, error) {
+	answer := func(ctx context.Context, name string) (string, error) {
 		calls++
+		_, hasDeadline := ctx.Deadline()
+		require.True(t, hasDeadline, "every read is bounded")
 		if fail {
-			return nil, errors.New("unreachable")
+			return "", errors.New("unreachable")
 		}
-		return &secretsmanager.GetSecretValueOutput{SecretString: aws.String(aws.ToString(in.SecretId) + "-v")}, nil
+		return name + "-v", nil
+	}
+	sm := &mockSMClient{fn: func(ctx context.Context, in *secretsmanager.GetSecretValueInput) (*secretsmanager.GetSecretValueOutput, error) {
+		v, err := answer(ctx, aws.ToString(in.SecretId))
+		if err != nil {
+			return nil, err
+		}
+		return &secretsmanager.GetSecretValueOutput{SecretString: aws.String(v)}, nil
 	}}
-	ssmc := &mockSSMClient{fn: func(_ context.Context, in *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
-		calls++
-		if fail {
-			return nil, errors.New("unreachable")
-		}
+	ssmc := &mockSSMClient{fn: func(ctx context.Context, in *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
 		require.True(t, aws.ToBool(in.WithDecryption))
-		return &ssm.GetParameterOutput{Parameter: &ssmtypes.Parameter{Value: aws.String(aws.ToString(in.Name) + "-v")}}, nil
+		v, err := answer(ctx, aws.ToString(in.Name))
+		if err != nil {
+			return nil, err
+		}
+		return &ssm.GetParameterOutput{Parameter: &ssmtypes.Parameter{Value: aws.String(v)}}, nil
 	}}
-	readers := map[string]*Reader{
-		"aws_sm": {read: func(ctx context.Context, name string) (string, error) {
-			return newTestAWSSMBuilder(sm).fetchSecret(ctx, awsSMConfig{SecretID: name})
-		}},
-		"aws_ssm": {read: func(ctx context.Context, name string) (string, error) {
-			return newTestAWSSSMBuilder(ssmc).fetchParameter(ctx, awsSSMConfig{Name: name})
-		}},
+	readers := map[string]*Reader{}
+	for _, store := range []string{"aws_sm", "aws_ssm"} {
+		r, err := NewReader(store, "us-west-2", slog.Default())
+		require.NoError(t, err)
+		readers[store] = r
+	}
+	readers["aws_sm"].sm.clientFor = func(_ context.Context, region string) (smClient, error) {
+		require.Equal(t, "us-west-2", region)
+		return sm, nil
+	}
+	readers["aws_ssm"].ssm.clientFor = func(_ context.Context, region string) (ssmClient, error) {
+		require.Equal(t, "us-west-2", region)
+		return ssmc, nil
 	}
 	for name, r := range readers {
 		t.Run(name, func(t *testing.T) {
@@ -55,12 +70,7 @@ func TestReaderReadsEveryCall(t *testing.T) {
 	}
 }
 
-func TestNewReader(t *testing.T) {
-	for _, store := range []string{"aws_sm", "aws_ssm"} {
-		r, err := NewReader(store, "us-west-2", slog.Default())
-		require.NoError(t, err)
-		require.NotNil(t, r)
-	}
+func TestNewReaderUnknownStore(t *testing.T) {
 	_, err := NewReader("env", "", slog.Default())
 	require.ErrorContains(t, err, `store "env" is not aws_sm or aws_ssm`)
 }
