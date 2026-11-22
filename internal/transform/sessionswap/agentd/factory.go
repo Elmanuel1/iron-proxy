@@ -1,5 +1,5 @@
-// Package agentd is the session_swap provider for agentd (`provider:
-// agentd`): its signed placeholders, its Managed Agents API for sessions and
+// Package agentd adapts sessionswap to agentd as the agentd_session_swap
+// transform: its signed placeholders, its Managed Agents API for sessions and
 // environments, and its sealed credential secrets in Secrets Manager or
 // Parameter Store.
 package agentd
@@ -16,12 +16,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/ironsh/iron-proxy/internal/transform"
 	"github.com/ironsh/iron-proxy/internal/transform/secrets"
 	"github.com/ironsh/iron-proxy/internal/transform/sessionswap"
 )
 
-// Name is the provider's name in the config.
-const Name = "agentd"
+// Name is the transform's name in the config.
+const Name = "agentd_session_swap"
 
 const (
 	placeholderKeysEnv = "AGENTD_PLACEHOLDER_KEYS"
@@ -30,7 +31,7 @@ const (
 )
 
 func init() {
-	sessionswap.RegisterProvider(Name, provider)
+	transform.Register(Name, factory)
 }
 
 type config struct {
@@ -45,12 +46,21 @@ type config struct {
 // lifetime agentd's design gives a copy of a credential's sealed secret.
 const defaultTTL = "5m"
 
-func provider(node yaml.Node, logger *slog.Logger) (sessionswap.Options, error) {
+func factory(node yaml.Node, logger *slog.Logger) (transform.Transformer, error) {
 	var cfg config
 	if err := node.Decode(&cfg); err != nil {
-		return sessionswap.Options{}, fmt.Errorf("parsing config: %w", err)
+		return nil, fmt.Errorf("parsing %s config: %w", Name, err)
 	}
-	return build(cfg, os.Getenv, logger)
+	opts, err := build(cfg, os.Getenv, logger)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", Name, err)
+	}
+	if err := startMetrics(); err != nil {
+		return nil, fmt.Errorf("%s: %w", Name, err)
+	}
+	opts.Name = Name
+	opts.Logger = logger
+	return sessionswap.New(opts), nil
 }
 
 func build(cfg config, getenv func(string) string, logger *slog.Logger) (sessionswap.Options, error) {

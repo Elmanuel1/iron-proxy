@@ -8,7 +8,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ironsh/iron-proxy/internal/transform"
-	"github.com/ironsh/iron-proxy/internal/transform/sessionswap"
 )
 
 func TestBuild(t *testing.T) {
@@ -49,16 +48,16 @@ func TestBuild(t *testing.T) {
 	}
 }
 
-func TestRegisteredAsSessionSwapProvider(t *testing.T) {
-	factory, err := transform.Lookup(sessionswap.Name)
+func TestRegistered(t *testing.T) {
+	factory, err := transform.Lookup(Name)
 	require.NoError(t, err)
 	t.Setenv(placeholderKeysEnv, "k1:"+keyHex)
 	t.Setenv(runtimeKeysEnv, "sk-ant-oat01-x")
 	var node yaml.Node
 	require.NoError(t, node.Encode(map[string]string{
-		"provider": Name, "agentd_url": "https://agentd.internal", "store": "aws_sm", "secret_prefix": "agentd",
+		"agentd_url": "https://agentd.internal", "store": "aws_sm", "secret_prefix": "agentd",
 	}))
 	tr, err := factory(node, slog.Default())
 	require.NoError(t, err)
-	require.Equal(t, sessionswap.Name, tr.Name())
+	require.Equal(t, Name, tr.Name())
 }

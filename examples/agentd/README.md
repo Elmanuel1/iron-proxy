@@ -1,28 +1,16 @@
-# Session swap
+# agentd session swap
 
-The `session_swap` transform lets one proxy, shared by many sandboxes, swap
+The `agentd_session_swap` transform lets one proxy, shared by many
+[agentd](https://github.com/Elmanuel1/agentd) `cloud` sandboxes, swap
 per-session placeholders for real credential values only for the session that
-owns them. It is the policy gate for the requests it sees, so it needs no
-`allowlist` beside it.
-
-A provider supplies the backend: how a caller and its egress policy are
-checked, how placeholders are verified, and where values are read. The
-transform's code does not change for a new backend: a provider implements the
-`Placeholders`, `Callers`, `Policies` and `Values` ports in
-`internal/transform/sessionswap` and registers itself with
-`sessionswap.RegisterProvider`.
-
-## The agentd provider
-
-`provider: agentd` serves [agentd](https://github.com/Elmanuel1/agentd)'s
-`cloud` sandboxes, whose `environment_variable` credentials hold signed
-`agentd-ph-` placeholders in place of values. A complete config is in
-[`iron-proxy.yaml`](iron-proxy.yaml).
+owns them. Those sandboxes' `environment_variable` credentials hold signed
+`agentd-ph-` placeholders in place of values. The transform is the policy gate
+for the requests it sees, so it needs no `allowlist` beside it. A complete
+config is in [`iron-proxy.yaml`](iron-proxy.yaml).
 
 ```yaml
-- name: session_swap
+- name: agentd_session_swap
   config:
-    provider: agentd
     agentd_url: "https://agentd.internal"  # agentd's Managed Agents API
     store: aws_sm                          # aws_sm or aws_ssm
     secret_prefix: "agentd"                # agentd's AGENTD_SECRETS_PREFIX
@@ -69,7 +57,7 @@ Each swap logs the credential id and a keyed fingerprint of the value at
 the runtime key travel on it. A failure to reach agentd fails the request
 closed: `502` inside a tunnel, `403` on `CONNECT`.
 
-Place any `body_capture` transform before `session_swap`: one after it would
+Place any `body_capture` transform before `agentd_session_swap`: one after it would
 capture the swapped value.
 
 Set `proxy.upstream_deny_cidrs` to every range a sandbox must not reach, as
@@ -78,7 +66,7 @@ endpoints), private (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
 `100.64.0.0/10`, `fc00::/7`). They are checked after DNS resolution.
 
 With `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`)
-set, `session_swap` exports three counters over OTLP every 60 s, by the
+set, `agentd_session_swap` exports three counters over OTLP every 60 s, by the
 standard `OTEL_*` variables. Export starts with the transform, so a proxy
 without it exports no metrics, and a stop drops what was counted since the
 last send:

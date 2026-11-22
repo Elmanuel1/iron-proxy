@@ -2,8 +2,8 @@
 #
 # Each sandbox reaches the proxy through HTTPS_PROXY and HTTP_PROXY set to
 # http://<session id>:<work token>@<proxy>:8080 and trusts the proxy's CA.
-# The session_swap transform, with its agentd provider, is the policy gate: it authenticates
-# every tunnel, applies the session's environment networking, and swaps only
+# The agentd_session_swap transform is the policy gate: it authenticates every
+# tunnel, applies the session's environment networking, and swaps only
 # that session's placeholders.
 #
 # Environment:
@@ -41,9 +41,8 @@ tls:
   ca_key: "/etc/iron-proxy/ca.key"
 
 transforms:
-  - name: session_swap
+  - name: agentd_session_swap
     config:
-      provider: agentd
       agentd_url: "https://agentd.internal"
       store: aws_sm
       secret_prefix: "agentd"

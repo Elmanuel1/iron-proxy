@@ -1,4 +1,4 @@
 package main
 
-// Registers the session_swap transform with its agentd provider.
+// Registers the agentd_session_swap transform.
 import _ "github.com/ironsh/iron-proxy/internal/transform/sessionswap/agentd"

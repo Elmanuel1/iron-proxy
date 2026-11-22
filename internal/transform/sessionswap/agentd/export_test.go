@@ -1,4 +1,4 @@
-package sessionswap
+package agentd
 
 import (
 	"context"

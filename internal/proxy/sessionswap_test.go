@@ -55,7 +55,7 @@ func (swapPorts) Read(context.Context, sessionswap.Claim) (sessionswap.Value, er
 
 func newSwapTransform() transform.Transformer {
 	return sessionswap.New(sessionswap.Options{
-		Name:         sessionswap.Name,
+		Name:         "agentd_session_swap",
 		Placeholders: swapPorts{},
 		Callers:      swapPorts{},
 		Policies:     swapPorts{},
