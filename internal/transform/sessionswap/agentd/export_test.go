@@ -13,8 +13,9 @@ import (
 )
 
 func TestExportMetrics(t *testing.T) {
+	previous := otel.GetMeterProvider()
 	otel.SetMeterProvider(noop.NewMeterProvider())
-	t.Cleanup(func() { otel.SetMeterProvider(noop.NewMeterProvider()) })
+	t.Cleanup(func() { otel.SetMeterProvider(previous) })
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "")
 	require.NoError(t, exportMetrics())

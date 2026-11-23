@@ -9,15 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 func TestMetrics(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
+	previous := otel.GetMeterProvider()
 	otel.SetMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)))
-	t.Cleanup(func() { otel.SetMeterProvider(noop.NewMeterProvider()) })
+	t.Cleanup(func() { otel.SetMeterProvider(previous) })
 	h := newHarness(Policy{Hosts: []string{"api.example.com"}}, everywhere())
 
 	tunnel := h.bound(t)
